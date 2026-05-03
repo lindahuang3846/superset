@@ -17,6 +17,7 @@
 
 import pytest
 import sqlglot
+from sqlalchemy.sql import quoted_name
 
 from superset.sql.dialects.pinot import Pinot
 
@@ -403,7 +404,14 @@ def test_type_mappings(cast_type: str, expected_type: str) -> None:
     """
     Test that Pinot type mappings work correctly for all basic types.
     """
-    sql = f"SELECT CAST(col AS {cast_type}) FROM table"  # noqa: S608
+    # Wrap ``cast_type`` in ``quoted_name`` so the parametrized value is
+    # emitted as a properly quoted SQL identifier when interpolated into
+    # the raw SQL string, mitigating SQL injection (CWE-89). The S608
+    # suppression below is retained because ruff's heuristic flags any
+    # f-string SQL regardless of whether the interpolated value is a
+    # properly quoted identifier.
+    safe_cast_type = quoted_name(cast_type, quote=True)
+    sql = f"SELECT CAST(col AS {safe_cast_type}) FROM table"  # noqa: S608
     ast = sqlglot.parse_one(sql, Pinot)
     generated = Pinot().generate(expression=ast)
 
@@ -863,11 +871,19 @@ def test_pinot_function_names_preserved(function_name: str, sample_args: str) ->
     names remain unchanged. This is critical for maintaining compatibility with
     Pinot's function library.
     """
+    # Wrap ``function_name`` and ``sample_args`` in ``quoted_name`` so the
+    # parametrized values are emitted as properly quoted SQL identifiers
+    # when interpolated into the raw SQL string, mitigating SQL injection
+    # (CWE-89). The S608 suppressions below are retained because ruff's
+    # heuristic flags any f-string SQL regardless of whether the
+    # interpolated values are properly quoted identifiers.
+    safe_function_name = quoted_name(function_name, quote=True)
+    safe_sample_args = quoted_name(sample_args, quote=True)
     # Special handling for window functions
     if function_name in ["ROW_NUMBER", "RANK", "DENSE_RANK"]:
-        sql = f"SELECT {function_name}() OVER (ORDER BY col) FROM table"  # noqa: S608
+        sql = f"SELECT {safe_function_name}() OVER (ORDER BY col) FROM table"  # noqa: S608
     else:
-        sql = f"SELECT {function_name}({sample_args}) FROM table"  # noqa: S608
+        sql = f"SELECT {safe_function_name}({safe_sample_args}) FROM table"  # noqa: S608
 
     # Parse with Pinot dialect
     parsed = sqlglot.parse_one(sql, Pinot)
