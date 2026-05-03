@@ -32,9 +32,11 @@ from marshmallow.exceptions import ValidationError
 from requests import Session
 from shillelagh.adapters.api.gsheets.lib import SCOPES
 from shillelagh.exceptions import UnauthenticatedError
+from sqlalchemy import literal_column, select
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.engine.url import URL
+from sqlalchemy.sql import table as sa_table
 
 from superset import db, security_manager
 from superset.databases.schemas import encrypted_field_properties, EncryptedString
@@ -405,8 +407,12 @@ class GSheetsEngineSpec(ShillelaghEngineSpec):
                 continue
 
             try:
-                url = url.replace('"', '""')
-                results = conn.execute(f'SELECT * FROM "{url}" LIMIT 1')  # noqa: S608
+                # Build the probe query via SQLAlchemy constructs so the
+                # user-supplied URL is quoted as a SQL identifier by the
+                # dialect's identifier preparer, preventing SQL injection
+                # via crafted Google Sheet URLs (CWE-89).
+                stmt = select(literal_column("*")).select_from(sa_table(url)).limit(1)
+                results = conn.execute(stmt)
                 results.fetchall()
             except Exception:  # pylint: disable=broad-except
                 errors.append(
