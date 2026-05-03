@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 from flask.ctx import AppContext
+from sqlalchemy import MetaData, select, Table
 from sqlalchemy.sql import quoted_name
 
 from superset import db, security_manager
@@ -119,10 +120,10 @@ def test_csv_upload_with_nulls():
             CSVReader({"null_values": ["N/A", "None"]}),
         ).run()
     with upload_database.get_sqla_engine() as engine:
-        # Identifier safely quoted via ``quoted_name``; ``# noqa: S608`` kept
-        # because ruff's heuristic flags any f-string SQL regardless of
-        # whether the interpolated value is a properly quoted identifier.
-        data = engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
+        # Use SQLAlchemy Core's reflected ``Table`` so the identifier is
+        # quoted by the dialect rather than interpolated into raw SQL.
+        csv_table = Table(CSV_UPLOAD_TABLE, MetaData(), autoload_with=engine)
+        data = engine.execute(select(csv_table)).fetchall()
         assert data == [
             ("name1", None, "city1", "1-1-1980"),
             ("name2", 29, None, "1-1-1981"),
@@ -166,21 +167,17 @@ def test_csv_upload_with_index():
             CSVReader({"dataframe_index": True, "index_label": "id"}),
         ).run()
     with upload_database.get_sqla_engine() as engine:
-        # Identifier safely quoted via ``quoted_name``; ``# noqa: S608`` kept
-        # because ruff's heuristic flags any f-string SQL regardless of
-        # whether the interpolated value is a properly quoted identifier.
-        data = engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
+        # Use SQLAlchemy Core's reflected ``Table`` so the identifier is
+        # quoted by the dialect rather than interpolated into raw SQL.
+        csv_table = Table(CSV_UPLOAD_TABLE, MetaData(), autoload_with=engine)
+        data = engine.execute(select(csv_table)).fetchall()
         assert data == [
             (0, "name1", 30, "city1", "1-1-1980"),
             (1, "name2", 29, "city2", "1-1-1981"),
             (2, "name3", 28, "city3", "1-1-1982"),
         ]
         # assert column names
-        assert [  # noqa: C416
-            col
-            # Identifier safely quoted via ``quoted_name``; see note above.
-            for col in engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").keys()  # noqa: S608
-        ] == [
+        assert list(csv_table.columns.keys()) == [
             "id",
             "Name",
             "Age",
