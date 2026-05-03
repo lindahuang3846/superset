@@ -232,7 +232,12 @@ class HiveEngineSpec(PrestoEngineSpec):
                 catalog=table.catalog,
                 schema=table.schema,
             ) as engine:
-                engine.execute(f"DROP TABLE IF EXISTS {str(table)}")
+                # Quote the fully qualified table reference using the dialect's
+                # identifier preparer to prevent SQL injection via an
+                # attacker-controlled table name supplied through the dataset
+                # upload UI.
+                quoted_table = cls.quote_table(table, engine.dialect)
+                engine.execute(f"DROP TABLE IF EXISTS {quoted_table}")
 
         def _get_hive_type(dtype: np.dtype[Any]) -> str:
             hive_type_by_dtype = {

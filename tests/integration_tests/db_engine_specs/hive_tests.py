@@ -185,8 +185,11 @@ def test_df_to_sql_if_exists_replace(mock_upload_to_s3, mock_g):
     mock_database = mock.MagicMock()
     mock_database.get_df.return_value.empty = False
     mock_execute = mock.MagicMock(return_value=True)
-    mock_database.get_sqla_engine.return_value.__enter__.return_value.execute = (
-        mock_execute
+    mock_engine = mock_database.get_sqla_engine.return_value.__enter__.return_value
+    mock_engine.execute = mock_execute
+    mock_engine.dialect.identifier_preparer.quote.side_effect = lambda x: f"`{x}`"
+    mock_engine.dialect.identifier_preparer.quote_schema.side_effect = lambda x: (
+        f"`{x}`"
     )
     table_name = "foobar"
 
@@ -198,7 +201,7 @@ def test_df_to_sql_if_exists_replace(mock_upload_to_s3, mock_g):
             {"if_exists": "replace", "header": 1, "na_values": "mock", "sep": "mock"},
         )
 
-    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS {table_name}")
+    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{table_name}`")
     app.config = config
 
 
@@ -212,8 +215,11 @@ def test_df_to_sql_if_exists_replace_with_schema(mock_upload_to_s3, mock_g):
     mock_database = mock.MagicMock()
     mock_database.get_df.return_value.empty = False
     mock_execute = mock.MagicMock(return_value=True)
-    mock_database.get_sqla_engine.return_value.__enter__.return_value.execute = (
-        mock_execute
+    mock_engine = mock_database.get_sqla_engine.return_value.__enter__.return_value
+    mock_engine.execute = mock_execute
+    mock_engine.dialect.identifier_preparer.quote.side_effect = lambda x: f"`{x}`"
+    mock_engine.dialect.identifier_preparer.quote_schema.side_effect = lambda x: (
+        f"`{x}`"
     )
     table_name = "foobar"
     schema = "schema"
@@ -226,7 +232,7 @@ def test_df_to_sql_if_exists_replace_with_schema(mock_upload_to_s3, mock_g):
             {"if_exists": "replace", "header": 1, "na_values": "mock", "sep": "mock"},
         )
 
-    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS {schema}.{table_name}")
+    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{schema}`.`{table_name}`")
     app.config = config
 
 
