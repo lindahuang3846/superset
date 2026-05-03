@@ -512,9 +512,10 @@ class HiveEngineSpec(PrestoEngineSpec):
         order_by: list[tuple[str, bool]] | None = None,
         filters: dict[Any, Any] | None = None,
     ) -> str:
-        full_table_name = (
-            f"{table.schema}.{table.table}" if table.schema else table.table
-        )
+        # Quote the fully qualified table reference using the dialect's
+        # identifier preparer so that an attacker-controlled schema or table
+        # name cannot inject SQL into the SHOW PARTITIONS query.
+        full_table_name = cls.quote_table(table, database.get_dialect())
         return f"SHOW PARTITIONS {full_table_name}"
 
     @classmethod
