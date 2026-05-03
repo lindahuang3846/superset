@@ -31,6 +31,7 @@ import pytest
 
 import flask  # noqa: F401
 from flask import current_app, has_app_context  # noqa: F401
+from sqlalchemy.sql import quoted_name
 
 from superset import db, sql_lab
 from superset.common.db_query_status import QueryStatus
@@ -117,7 +118,12 @@ def run_sql(
 
 def drop_table_if_exists(table_name: str, table_type: CTASMethod) -> None:
     """Drop table if it exists, works on any DB"""
-    sql = f"DROP {table_type.name} IF EXISTS {table_name}"
+    # Wrap ``table_name`` in ``quoted_name`` so it is emitted as a properly
+    # quoted SQL identifier when interpolated into the raw SQL string,
+    # mitigating SQL injection (CWE-89). ``table_type.name`` is sourced from
+    # the ``CTASMethod`` enum and is therefore already a safe constant.
+    safe_table_name = quoted_name(table_name, quote=True)
+    sql = f"DROP {table_type.name} IF EXISTS {safe_table_name}"
     database = get_example_database()
     with database.get_sqla_engine() as engine:
         engine.execute(sql)
@@ -576,7 +582,12 @@ def test_in_app_context():
 
 
 def delete_tmp_view_or_table(name: str, ctas_method: CTASMethod):
-    db.get_engine().execute(f"DROP {ctas_method.name} IF EXISTS {name}")
+    # Wrap ``name`` in ``quoted_name`` so it is emitted as a properly quoted
+    # SQL identifier when interpolated into the raw SQL string, mitigating
+    # SQL injection (CWE-89). ``ctas_method.name`` is sourced from the
+    # ``CTASMethod`` enum and is therefore already a safe constant.
+    safe_name = quoted_name(name, quote=True)
+    db.get_engine().execute(f"DROP {ctas_method.name} IF EXISTS {safe_name}")
 
 
 def wait_for_success(result):
