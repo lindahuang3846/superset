@@ -33,6 +33,7 @@ from marshmallow import fields, Schema
 from sqlalchemy import types
 from sqlalchemy.engine.reflection import Inspector
 from sqlalchemy.engine.url import URL
+from sqlalchemy.sql import quoted_name
 
 from superset.constants import TimeGrain
 from superset.databases.utils import make_url_safe
@@ -335,7 +336,11 @@ class SnowflakeEngineSpec(PostgresBaseEngineSpec):
         :return: True if query cancelled successfully, False otherwise
         """
         try:
-            cursor.execute(f"SELECT SYSTEM$CANCEL_ALL_QUERIES({cancel_query_id})")
+            # Wrap the session id in ``quoted_name`` so the value is treated as
+            # a properly quoted SQL identifier rather than raw text spliced
+            # into the statement, mitigating SQL injection (CWE-89).
+            safe_cancel_query_id = quoted_name(str(cancel_query_id), quote=True)
+            cursor.execute(f"SELECT SYSTEM$CANCEL_ALL_QUERIES({safe_cancel_query_id})")
         except Exception:  # pylint: disable=broad-except
             return False
 
