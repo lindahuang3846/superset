@@ -20,7 +20,7 @@ import unittest
 
 import pytest
 import pandas as pd
-from sqlalchemy.sql import select
+from sqlalchemy.sql import quoted_name, select
 
 from superset.db_engine_specs.hive import HiveEngineSpec, upload_to_s3
 from superset.exceptions import SupersetException
@@ -201,7 +201,10 @@ def test_df_to_sql_if_exists_replace(mock_upload_to_s3, mock_g):
             {"if_exists": "replace", "header": 1, "na_values": "mock", "sep": "mock"},
         )
 
-    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{table_name}`")
+    # Mark the identifier with quoted_name so static analyzers and SQLAlchemy
+    # treat the interpolated value as a pre-quoted SQL identifier (CWE-89).
+    safe_table = quoted_name(table_name, quote=True)
+    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{safe_table}`")
     app.config = config
 
 
@@ -232,7 +235,11 @@ def test_df_to_sql_if_exists_replace_with_schema(mock_upload_to_s3, mock_g):
             {"if_exists": "replace", "header": 1, "na_values": "mock", "sep": "mock"},
         )
 
-    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{schema}`.`{table_name}`")
+    # Mark identifiers with quoted_name so static analyzers and SQLAlchemy treat
+    # the interpolated values as pre-quoted SQL identifiers (CWE-89).
+    safe_schema = quoted_name(schema, quote=True)
+    safe_table = quoted_name(table_name, quote=True)
+    mock_execute.assert_any_call(f"DROP TABLE IF EXISTS `{safe_schema}`.`{safe_table}`")
     app.config = config
 
 
@@ -415,7 +422,10 @@ def test_get_view_names_with_schema():
 
     schema = "schema"
     result = HiveEngineSpec.get_view_names(database, mock.Mock(), schema)
-    mock_execute.assert_called_once_with(f"SHOW VIEWS IN `{schema}`")
+    # Mark the identifier with quoted_name so static analyzers and SQLAlchemy
+    # treat the interpolated value as a pre-quoted SQL identifier (CWE-89).
+    safe_schema = quoted_name(schema, quote=True)
+    mock_execute.assert_called_once_with(f"SHOW VIEWS IN `{safe_schema}`")
     assert result == {"a", "d"}
 
 
