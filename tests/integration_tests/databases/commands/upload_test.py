@@ -45,7 +45,9 @@ CSV_UPLOAD_TABLE_W_SCHEMA = "csv_upload_w_schema"
 
 # Wrap table identifiers in ``quoted_name`` so they are treated as properly
 # quoted SQL identifiers when interpolated into raw SQL strings, mitigating
-# SQL injection (CWE-89).
+# SQL injection (CWE-89). For raw ``SELECT`` queries against the upload
+# table, the test code uses SQLAlchemy Core ``Table`` reflection together
+# with ``select(...)`` so the dialect handles identifier quoting.
 SAFE_CSV_UPLOAD_TABLE = quoted_name(CSV_UPLOAD_TABLE, quote=True)
 SAFE_CSV_UPLOAD_TABLE_W_SCHEMA = quoted_name(CSV_UPLOAD_TABLE_W_SCHEMA, quote=True)
 
