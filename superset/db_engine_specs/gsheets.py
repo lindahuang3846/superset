@@ -270,7 +270,11 @@ class GSheetsEngineSpec(ShillelaghEngineSpec):
             schema=table.schema,
         ) as conn:
             cursor = conn.cursor()
-            cursor.execute(f'SELECT GET_METADATA("{table.table}")')
+            # Use the dialect's identifier preparer to safely quote the table
+            # name, preventing SQL injection via embedded quote characters in
+            # the user-supplied Google Sheet name.
+            quoted_table = database.quote_identifier(table.table)
+            cursor.execute(f"SELECT GET_METADATA({quoted_table})")
             results = cursor.fetchone()[0]
         try:
             metadata = json.loads(results)
