@@ -86,7 +86,10 @@ def load_parquet_table(  # noqa: C901
         else:
             # Create schema if it doesn't exist (PostgreSQL)
             with engine.begin() as conn:
-                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+                # Quote schema identifier via the dialect's identifier preparer
+                # to safely escape any embedded quote characters (CWE-89).
+                quoted_schema = engine.dialect.identifier_preparer.quote_schema(schema)
+                conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {quoted_schema}"))
 
     table_exists = database.has_table(Table(table_name, schema=schema))
     if table_exists and not force:
