@@ -913,7 +913,13 @@ class TestDatasetApi(SupersetTestCase):
         rv = self.client.delete(uri)
         assert rv.status_code == 200
         with example_db.get_sqla_engine() as engine:
-            engine.execute(f"DROP TABLE {CTAS_SCHEMA_NAME}.birth_names")
+            # Quote schema and table identifiers via the dialect's identifier
+            # preparer to avoid SQL injection when interpolating them into
+            # raw statements (CWE-89).
+            quote = engine.dialect.identifier_preparer.quote
+            safe_schema = quote(CTAS_SCHEMA_NAME)
+            safe_table = quote("birth_names")
+            engine.execute(f"DROP TABLE {safe_schema}.{safe_table}")
 
     def test_create_dataset_validate_database(self):
         """
