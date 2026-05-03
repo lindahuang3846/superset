@@ -205,15 +205,24 @@ class HiveEngineSpec(PrestoEngineSpec):
             raise SupersetException("Append operation not currently supported")
 
         if to_sql_kwargs["if_exists"] == "fail":
-            # Ensure table doesn't already exist.
-            if table.schema:
-                table_exists = not database.get_df(
-                    f"SHOW TABLES IN {table.schema} LIKE '{table.table}'"
-                ).empty
-            else:
-                table_exists = not database.get_df(
-                    f"SHOW TABLES LIKE '{table.table}'"
-                ).empty
+            # Ensure table doesn't already exist. User-supplied schema and table
+            # names are quoted via the dialect's identifier preparer so they
+            # cannot be used to inject SQL into the SHOW TABLES query.
+            with cls.get_engine(
+                database,
+                catalog=table.catalog,
+                schema=table.schema,
+            ) as engine:
+                quote = engine.dialect.identifier_preparer.quote
+                if table.schema:
+                    table_exists = not database.get_df(
+                        f"SHOW TABLES IN {quote(table.schema)} "
+                        f"LIKE '{quote(table.table)}'"
+                    ).empty
+                else:
+                    table_exists = not database.get_df(
+                        f"SHOW TABLES LIKE '{quote(table.table)}'"
+                    ).empty
 
             if table_exists:
                 raise SupersetException("Table already exists")
