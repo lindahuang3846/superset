@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from pandas import DataFrame
 from sqlalchemy.inspection import inspect
+from sqlalchemy.sql import quoted_name
 
 from tests.common.logger_utils import log
 from tests.example_data.data_loading.base_data_loader import DataLoader
@@ -74,7 +75,9 @@ class PandasDataLoader(DataLoader):
         return None
 
     def remove_table(self, table_name: str) -> None:
-        self._db_engine.execute(f"DROP TABLE IF EXISTS {table_name}")
+        # Quote the identifier to prevent SQL injection via the table name.
+        safe_table_name = quoted_name(table_name, quote=True)
+        self._db_engine.execute(f"DROP TABLE IF EXISTS {safe_table_name}")
 
 
 class TableToDfConvertor(ABC):
