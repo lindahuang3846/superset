@@ -129,9 +129,11 @@ def assign_uuids(
     # Use dialect specific native SQL queries if possible
     for dialect, sql in uuid_by_dialect.items():
         if isinstance(bind.dialect, dialect):
-            op.execute(
-                f"UPDATE {dialect().identifier_preparer.quote(table_name)} SET uuid = {sql}"  # noqa: S608, E501
-            )
+            # Use SQLAlchemy's update construct so the table identifier is rendered
+            # via the dialect's identifier preparer (preventing SQL injection); the
+            # dialect-specific SQL expression is a hardcoded constant from
+            # uuid_by_dialect and is wrapped in text() to inline it server-side.
+            op.execute(update(model).values(uuid=text(sql)))
             print(f"Done. Assigned {count} uuids in {time.time() - start_time:.3f}s.\n")
             return
 
