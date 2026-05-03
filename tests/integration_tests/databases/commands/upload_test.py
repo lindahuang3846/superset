@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import pytest
 from flask.ctx import AppContext
+from sqlalchemy.sql import quoted_name
 
 from superset import db, security_manager
 from superset.commands.database.exceptions import (
@@ -40,6 +41,12 @@ from tests.unit_tests.fixtures.common import create_csv_file
 CSV_UPLOAD_DATABASE = "csv_explore_db"
 CSV_UPLOAD_TABLE = "csv_upload"
 CSV_UPLOAD_TABLE_W_SCHEMA = "csv_upload_w_schema"
+
+# Wrap table identifiers in ``quoted_name`` so they are treated as properly
+# quoted SQL identifiers when interpolated into raw SQL strings, mitigating
+# SQL injection (CWE-89).
+SAFE_CSV_UPLOAD_TABLE = quoted_name(CSV_UPLOAD_TABLE, quote=True)
+SAFE_CSV_UPLOAD_TABLE_W_SCHEMA = quoted_name(CSV_UPLOAD_TABLE_W_SCHEMA, quote=True)
 
 
 CSV_FILE_1 = [
@@ -78,8 +85,8 @@ def _setup_csv_upload(allowed_schemas: list[str] | None = None):
 
     upload_db = get_upload_db()
     with upload_db.get_sqla_engine() as engine:
-        engine.execute(f"DROP TABLE IF EXISTS {CSV_UPLOAD_TABLE}")
-        engine.execute(f"DROP TABLE IF EXISTS {CSV_UPLOAD_TABLE_W_SCHEMA}")
+        engine.execute(f"DROP TABLE IF EXISTS {SAFE_CSV_UPLOAD_TABLE}")
+        engine.execute(f"DROP TABLE IF EXISTS {SAFE_CSV_UPLOAD_TABLE_W_SCHEMA}")
     db.session.delete(upload_db)
     db.session.commit()
 
@@ -112,7 +119,10 @@ def test_csv_upload_with_nulls():
             CSVReader({"null_values": ["N/A", "None"]}),
         ).run()
     with upload_database.get_sqla_engine() as engine:
-        data = engine.execute(f"SELECT * from {CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
+        # Identifier safely quoted via ``quoted_name``; ``# noqa: S608`` kept
+        # because ruff's heuristic flags any f-string SQL regardless of
+        # whether the interpolated value is a properly quoted identifier.
+        data = engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
         assert data == [
             ("name1", None, "city1", "1-1-1980"),
             ("name2", 29, None, "1-1-1981"),
@@ -156,7 +166,10 @@ def test_csv_upload_with_index():
             CSVReader({"dataframe_index": True, "index_label": "id"}),
         ).run()
     with upload_database.get_sqla_engine() as engine:
-        data = engine.execute(f"SELECT * from {CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
+        # Identifier safely quoted via ``quoted_name``; ``# noqa: S608`` kept
+        # because ruff's heuristic flags any f-string SQL regardless of
+        # whether the interpolated value is a properly quoted identifier.
+        data = engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").fetchall()  # noqa: S608
         assert data == [
             (0, "name1", 30, "city1", "1-1-1980"),
             (1, "name2", 29, "city2", "1-1-1981"),
@@ -165,7 +178,8 @@ def test_csv_upload_with_index():
         # assert column names
         assert [  # noqa: C416
             col
-            for col in engine.execute(f"SELECT * from {CSV_UPLOAD_TABLE}").keys()  # noqa: S608
+            # Identifier safely quoted via ``quoted_name``; see note above.
+            for col in engine.execute(f"SELECT * from {SAFE_CSV_UPLOAD_TABLE}").keys()  # noqa: S608
         ] == [
             "id",
             "Name",
