@@ -500,18 +500,27 @@ class PrestoBaseEngineSpec(BaseEngineSpec, metaclass=ABCMeta):
         # Default to the new syntax if version is unset.
         presto_version = database.get_extra().get("version")
 
+        # Quote identifiers via SQLAlchemy's identifier preparer to safely
+        # interpolate user-controlled schema/table names and prevent SQL
+        # injection (CWE-89).
+        preparer = database.get_dialect().identifier_preparer
         if presto_version and Version(presto_version) < Version("0.199"):
             full_table_name = (
-                f"{table.schema}.{table.table}" if table.schema else table.table
+                f"{preparer.quote_schema(table.schema)}.{preparer.quote(table.table)}"
+                if table.schema
+                else preparer.quote(table.table)
             )
             partition_select_clause = f"SHOW PARTITIONS FROM {full_table_name}"
         else:
-            system_table_name = f'"{table.table}$partitions"'
+            system_table_name = preparer.quote(f"{table.table}$partitions")
             full_table_name = (
-                f"{table.schema}.{system_table_name}"
+                f"{preparer.quote_schema(table.schema)}.{system_table_name}"
                 if table.schema
                 else system_table_name
             )
+            # `full_table_name` is composed exclusively from dialect-quoted
+            # identifiers (see the `preparer.quote*` calls above), so this
+            # f-string is safe; the `noqa` silences ruff's S608 pattern match.
             partition_select_clause = f"SELECT * FROM {full_table_name}"  # noqa: S608
 
         sql = dedent(
@@ -697,6 +706,8 @@ class PrestoBaseEngineSpec(BaseEngineSpec, metaclass=ABCMeta):
         :param table: table instance
         :return: list of column objects
         """
+        # `quote_table` returns a dialect-quoted identifier, so this f-string
+        # composes a safe SQL statement (CWE-89).
         full_table_name = cls.quote_table(table, inspector.engine.dialect)
         return inspector.bind.execute(f"SHOW COLUMNS FROM {full_table_name}").fetchall()
 
@@ -1338,7 +1349,14 @@ class PrestoEngineSpec(PrestoBaseEngineSpec):
 
         with database.get_raw_connection(schema=schema) as conn:
             cursor = conn.cursor()
-            sql = f"SHOW CREATE VIEW {schema}.{table}"
+            # Quote identifiers via SQLAlchemy's identifier preparer to safely
+            # interpolate user-controlled schema/table names and prevent SQL
+            # injection (CWE-89).
+            preparer = database.get_dialect().identifier_preparer
+            sql = (
+                f"SHOW CREATE VIEW {preparer.quote_schema(schema)}."
+                f"{preparer.quote(table)}"
+            )
             try:
                 cls.execute(cursor, sql, database)
                 rows = cls.fetch_data(cursor, 1)
