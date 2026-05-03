@@ -138,7 +138,16 @@ class SecretsMigrator:
     def _select_columns_from_table(
         conn: Connection, column_names: list[str], table_name: str
     ) -> Row:
-        return conn.execute(f"SELECT id, {','.join(column_names)} FROM {table_name}")  # noqa: S608
+        # Quote identifiers via the dialect to avoid SQL injection through
+        # crafted table or column names (CWE-89).
+        quote = conn.dialect.identifier_preparer.quote
+        quoted_columns = ",".join(quote(col) for col in column_names)
+        quoted_table = quote(table_name)
+        # Identifiers are quoted via the dialect above; ruff S608 cannot detect
+        # the safety of string-based query construction.
+        return conn.execute(
+            f"SELECT id, {quoted_columns} FROM {quoted_table}"  # noqa: S608
+        )
 
     def _re_encrypt_row(
         self,
@@ -183,12 +192,18 @@ class SecretsMigrator:
                 self._dialect,
             )
 
+        # Quote identifiers via the dialect to avoid SQL injection through
+        # crafted table or column names (CWE-89).
+        quote = conn.dialect.identifier_preparer.quote
+        quoted_table = quote(table_name)
         set_cols = ",".join(
-            [f"{name} = :{name}" for name in list(re_encrypted_columns.keys())]
+            [f"{quote(name)} = :{name}" for name in list(re_encrypted_columns.keys())]
         )
         logger.info("Processing table: %s", table_name)
+        # Identifiers are quoted via the dialect above; ruff S608 cannot detect
+        # the safety of string-based query construction.
         conn.execute(
-            text(f"UPDATE {table_name} SET {set_cols} WHERE id = :id"),  # noqa: S608
+            text(f"UPDATE {quoted_table} SET {set_cols} WHERE id = :id"),  # noqa: S608
             id=row["id"],
             **re_encrypted_columns,
         )
