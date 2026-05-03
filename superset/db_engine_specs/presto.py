@@ -500,18 +500,25 @@ class PrestoBaseEngineSpec(BaseEngineSpec, metaclass=ABCMeta):
         # Default to the new syntax if version is unset.
         presto_version = database.get_extra().get("version")
 
+        # Use the dialect's identifier preparer to quote schema/table names so
+        # an attacker-controlled identifier cannot inject SQL (CWE-89).
+        dialect = database.get_dialect()
+        preparer = dialect.identifier_preparer
         if presto_version and Version(presto_version) < Version("0.199"):
-            full_table_name = (
-                f"{table.schema}.{table.table}" if table.schema else table.table
-            )
+            full_table_name = cls.quote_table(table, dialect)
             partition_select_clause = f"SHOW PARTITIONS FROM {full_table_name}"
         else:
-            system_table_name = f'"{table.table}$partitions"'
+            system_table_name = preparer.quote(f"{table.table}$partitions")
             full_table_name = (
-                f"{table.schema}.{system_table_name}"
+                f"{preparer.quote_schema(table.schema)}.{system_table_name}"
                 if table.schema
                 else system_table_name
             )
+            # ``full_table_name`` is fully quoted by the dialect's identifier
+            # preparer above; the f-string interpolates a safely escaped
+            # identifier. The S608 suppression below is retained because
+            # ruff's heuristic flags any f-string SELECT regardless of
+            # whether the interpolated value is properly quoted.
             partition_select_clause = f"SELECT * FROM {full_table_name}"  # noqa: S608
 
         sql = dedent(
@@ -697,6 +704,8 @@ class PrestoBaseEngineSpec(BaseEngineSpec, metaclass=ABCMeta):
         :param table: table instance
         :return: list of column objects
         """
+        # ``quote_table`` applies the dialect's identifier preparer, so the
+        # interpolated value is a safely quoted identifier (CWE-89).
         full_table_name = cls.quote_table(table, inspector.engine.dialect)
         return inspector.bind.execute(f"SHOW COLUMNS FROM {full_table_name}").fetchall()
 
@@ -1338,7 +1347,15 @@ class PrestoEngineSpec(PrestoBaseEngineSpec):
 
         with database.get_raw_connection(schema=schema) as conn:
             cursor = conn.cursor()
-            sql = f"SHOW CREATE VIEW {schema}.{table}"
+            # Quote schema/table with the dialect's identifier preparer so an
+            # attacker-controlled identifier cannot inject SQL (CWE-89).
+            preparer = database.get_dialect().identifier_preparer
+            quoted_view = (
+                f"{preparer.quote_schema(schema)}.{preparer.quote(table)}"
+                if schema
+                else preparer.quote(table)
+            )
+            sql = f"SHOW CREATE VIEW {quoted_view}"
             try:
                 cls.execute(cursor, sql, database)
                 rows = cls.fetch_data(cursor, 1)
