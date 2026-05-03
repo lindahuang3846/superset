@@ -146,14 +146,20 @@ def setup_sample_data() -> Any:
 
 
 def drop_from_schema(engine: Engine, schema_name: str):
-    schemas = engine.execute(f"SHOW SCHEMAS").fetchall()  # noqa: F541
+    # Quote identifiers via the dialect's identifier preparer so schema/table
+    # names cannot be used to inject SQL when interpolated into raw
+    # statements (CWE-89).
+    quote = engine.dialect.identifier_preparer.quote
+    safe_schema = quote(schema_name)
+    schemas = engine.execute("SHOW SCHEMAS").fetchall()
     if schema_name not in [s[0] for s in schemas]:
         # schema doesn't exist
         return
-    tables_or_views = engine.execute(f"SHOW TABLES in {schema_name}").fetchall()
+    tables_or_views = engine.execute(f"SHOW TABLES in {safe_schema}").fetchall()
     for tv in tables_or_views:
-        engine.execute(f"DROP TABLE IF EXISTS {schema_name}.{tv[0]}")
-        engine.execute(f"DROP VIEW IF EXISTS {schema_name}.{tv[0]}")
+        safe_tv = quote(tv[0])
+        engine.execute(f"DROP TABLE IF EXISTS {safe_schema}.{safe_tv}")
+        engine.execute(f"DROP VIEW IF EXISTS {safe_schema}.{safe_tv}")
 
 
 @pytest.fixture(scope="session")
@@ -212,13 +218,20 @@ def setup_presto_if_needed():
     if backend in {"presto", "hive"}:
         database = get_example_database()
         with database.get_sqla_engine() as engine:
+            # Quote schema names via the dialect's identifier preparer to
+            # avoid SQL injection when interpolating them into raw
+            # statements (CWE-89).
+            quote = engine.dialect.identifier_preparer.quote
+            safe_ctas_schema = quote(CTAS_SCHEMA_NAME)
+            safe_admin_schema = quote(ADMIN_SCHEMA_NAME)
+
             drop_from_schema(engine, CTAS_SCHEMA_NAME)
-            engine.execute(f"DROP SCHEMA IF EXISTS {CTAS_SCHEMA_NAME}")
-            engine.execute(f"CREATE SCHEMA {CTAS_SCHEMA_NAME}")
+            engine.execute(f"DROP SCHEMA IF EXISTS {safe_ctas_schema}")
+            engine.execute(f"CREATE SCHEMA {safe_ctas_schema}")
 
             drop_from_schema(engine, ADMIN_SCHEMA_NAME)
-            engine.execute(f"DROP SCHEMA IF EXISTS {ADMIN_SCHEMA_NAME}")
-            engine.execute(f"CREATE SCHEMA {ADMIN_SCHEMA_NAME}")
+            engine.execute(f"DROP SCHEMA IF EXISTS {safe_admin_schema}")
+            engine.execute(f"CREATE SCHEMA {safe_admin_schema}")
 
 
 def with_feature_flags(**mock_feature_flags):
