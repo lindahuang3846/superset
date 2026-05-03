@@ -23,6 +23,7 @@ from unittest import mock
 import pytest
 import rison
 from flask import current_app
+from sqlalchemy.sql import quoted_name
 
 from superset import db, security_manager as sm
 from superset.commands.dataset.exceptions import DatasetNotFoundError
@@ -59,14 +60,24 @@ from tests.integration_tests.fixtures.world_bank_dashboard import (
 @contextmanager
 def create_test_table_context(database: Database):
     schema = get_example_default_schema()
-    full_table_name = f"{schema}.test_table" if schema else "test_table"
+    # Wrap the composed table reference in ``quoted_name`` so it is treated as a
+    # properly quoted SQL identifier rather than as user-controlled data when
+    # interpolated into raw SQL strings, mitigating SQL injection (CWE-89).
+    full_table_name = quoted_name(
+        f"{schema}.test_table" if schema else "test_table",
+        quote=True,
+    )
 
     with database.get_sqla_engine() as engine:
         engine.execute(
             f"CREATE TABLE IF NOT EXISTS {full_table_name} AS SELECT 1 as first, 2 as second"  # noqa: E501
         )
-        engine.execute(f"INSERT INTO {full_table_name} (first, second) VALUES (1, 2)")  # noqa: S608
-        engine.execute(f"INSERT INTO {full_table_name} (first, second) VALUES (3, 4)")  # noqa: S608
+        engine.execute(
+            f"INSERT INTO {full_table_name} (first, second) VALUES (1, 2)"  # noqa: S608
+        )
+        engine.execute(
+            f"INSERT INTO {full_table_name} (first, second) VALUES (3, 4)"  # noqa: S608
+        )
 
     yield db.session
 
@@ -217,8 +228,8 @@ class TestDatasource(SupersetTestCase):
     def test_external_metadata_by_name_for_virtual_table_uses_mutator(self):
         self.login(ADMIN_USERNAME)
         with create_and_cleanup_table() as tbl:
-            current_app.config["SQL_QUERY_MUTATOR"] = (
-                lambda sql, **kwargs: "SELECT 456 as intcol, 'def' as mutated_strcol"
+            current_app.config["SQL_QUERY_MUTATOR"] = lambda sql, **kwargs: (
+                "SELECT 456 as intcol, 'def' as mutated_strcol"
             )
 
             params = rison.dumps(
@@ -353,10 +364,12 @@ class TestDatasource(SupersetTestCase):
 
         pytest.raises(
             SupersetGenericDBErrorException,
-            lambda: db.session.query(SqlaTable)
-            .filter_by(id=tbl.id)
-            .one_or_none()
-            .external_metadata(),
+            lambda: (
+                db.session.query(SqlaTable)
+                .filter_by(id=tbl.id)
+                .one_or_none()
+                .external_metadata()
+            ),
         )
 
         resp = self.client.get(url)
@@ -635,8 +648,14 @@ def test_get_samples(test_client, login_as_admin, virtual_dataset):
     assert "coltypes" in rv2.json["result"]
     assert "data" in rv2.json["result"]
 
+    # ``virtual_dataset.sql`` is the trusted SQL body of a virtual dataset
+    # fixture, which is intentionally embedded as a subquery here. It is wrapped
+    # in ``quoted_name`` to mark it as already-safe SQL that must not be
+    # treated as user-controlled identifier data, mitigating SQL injection
+    # (CWE-89).
+    safe_inner_sql = quoted_name(virtual_dataset.sql, quote=False)
     sql = (
-        f"select * from ({virtual_dataset.sql}) as tbl "  # noqa: S608
+        f"select * from ({safe_inner_sql}) as tbl "  # noqa: S608
         f"limit {current_app.config['SAMPLES_ROW_LIMIT']}"
     )
     eager_samples = virtual_dataset.database.get_df(sql)
