@@ -28,7 +28,7 @@ from uuid import uuid4
 import sqlalchemy.sql.sqltypes
 import sqlalchemy_utils
 from flask_appbuilder import Model
-from sqlalchemy import Column, inspect, MetaData, Table as DBTable
+from sqlalchemy import Column, inspect, MetaData, select, Table as DBTable
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import func
 from sqlalchemy.sql.visitors import VisitableType
@@ -122,8 +122,11 @@ def get_type_generator(  # pylint: disable=too-many-return-statements,too-many-b
             sqlalchemy.sql.sqltypes.DateTime,
         ),
     ):
-        return lambda: datetime.fromordinal(MINIMUM_DATE.toordinal()) + timedelta(
-            seconds=random.randrange(days_range * 86400)  # noqa: S311
+        return lambda: (
+            datetime.fromordinal(MINIMUM_DATE.toordinal())
+            + timedelta(
+                seconds=random.randrange(days_range * 86400)  # noqa: S311
+            )
         )
 
     if isinstance(sqltype, sqlalchemy.sql.sqltypes.Numeric):
@@ -284,7 +287,12 @@ def add_sample_rows(model: type[Model], count: int) -> Iterator[Model]:
 def get_valid_foreign_key(column: Column) -> Any:
     foreign_key = list(column.foreign_keys)[0]
     table_name, column_name = foreign_key.target_fullname.split(".", 1)
-    return db.engine.execute(f"SELECT {column_name} FROM {table_name} LIMIT 1").scalar()  # noqa: S608
+    # Build the lookup query through SQLAlchemy Core rather than f-string
+    # interpolation so that the table and column identifiers are quoted by
+    # the active dialect. This prevents identifier metacharacters from
+    # breaking out of the identifier context (CWE-89).
+    target_table = DBTable(table_name, MetaData(), autoload_with=db.engine)
+    return db.engine.execute(select(target_table.c[column_name]).limit(1)).scalar()
 
 
 def generate_value(column: Column) -> Any:
