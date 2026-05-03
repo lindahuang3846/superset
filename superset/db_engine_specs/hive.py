@@ -207,7 +207,7 @@ class HiveEngineSpec(PrestoEngineSpec):
         if to_sql_kwargs["if_exists"] == "fail":
             # Ensure table doesn't already exist. User-supplied schema and table
             # names are quoted via the dialect's identifier preparer so they
-            # cannot be used to inject SQL into the SHOW TABLES query.
+            # cannot be used to inject SQL into the SHOW TABLES query (CWE-89).
             with cls.get_engine(
                 database,
                 catalog=table.catalog,
@@ -235,7 +235,7 @@ class HiveEngineSpec(PrestoEngineSpec):
                 # Quote the fully qualified table reference using the dialect's
                 # identifier preparer to prevent SQL injection via an
                 # attacker-controlled table name supplied through the dataset
-                # upload UI.
+                # upload UI (CWE-89).
                 quoted_table = cls.quote_table(table, engine.dialect)
                 engine.execute(f"DROP TABLE IF EXISTS {quoted_table}")
 
@@ -514,7 +514,7 @@ class HiveEngineSpec(PrestoEngineSpec):
     ) -> str:
         # Quote the fully qualified table reference using the dialect's
         # identifier preparer so that an attacker-controlled schema or table
-        # name cannot inject SQL into the SHOW PARTITIONS query.
+        # name cannot inject SQL into the SHOW PARTITIONS query (CWE-89).
         full_table_name = cls.quote_table(table, database.get_dialect())
         return f"SHOW PARTITIONS {full_table_name}"
 
