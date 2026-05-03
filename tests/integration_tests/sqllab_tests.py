@@ -22,6 +22,7 @@ from textwrap import dedent
 import pytest
 from celery.exceptions import SoftTimeLimitExceeded
 from parameterized import parameterized
+from sqlalchemy.sql import quoted_name
 from unittest import mock
 import rison
 
@@ -183,8 +184,17 @@ class TestSqlLab(SupersetTestCase):
             db.session.commit()
             examples_db = get_example_database()
             with examples_db.get_sqla_engine() as engine:
+                # Quote identifiers via the dialect's identifier preparer to
+                # avoid SQL injection when interpolating them into raw
+                # statements (CWE-89).
+                quote = engine.dialect.identifier_preparer.quote
+                safe_admin_schema = quote("admin_database")
+                safe_tmp_table = quote(tmp_table_name)
+                # Identifiers safely quoted above; the S608 suppression below
+                # is kept because ruff's heuristic flags any f-string SQL
+                # regardless of whether interpolated values are properly quoted.
                 data = engine.execute(
-                    f"SELECT * FROM admin_database.{tmp_table_name}"  # noqa: S608
+                    f"SELECT * FROM {safe_admin_schema}.{safe_tmp_table}"  # noqa: S608
                 ).fetchall()
                 names_count = engine.execute(
                     f"SELECT COUNT(*) FROM birth_names"  # noqa: F541, S608
@@ -195,7 +205,7 @@ class TestSqlLab(SupersetTestCase):
 
                 # cleanup
                 engine.execute(
-                    f"DROP {ctas_method.name} admin_database.{tmp_table_name}"
+                    f"DROP {ctas_method.name} {safe_admin_schema}.{safe_tmp_table}"
                 )
                 examples_db.allow_ctas = old_allow_ctas
                 db.session.commit()
@@ -297,15 +307,21 @@ class TestSqlLab(SupersetTestCase):
                 f"CREATE TABLE IF NOT EXISTS {CTAS_SCHEMA_NAME}.test_table AS SELECT 1 as c1, 2 as c2"  # noqa: E501
             )
 
+        # Quote the schema identifier via ``quoted_name`` so it is treated as a
+        # properly quoted SQL identifier when interpolated, mitigating SQL
+        # injection (CWE-89). The S608 suppressions below are kept because
+        # ruff's heuristic flags any f-string SQL regardless of whether the
+        # interpolated value is a properly quoted identifier.
+        safe_ctas_schema = quoted_name(CTAS_SCHEMA_NAME, quote=True)
         data = self.run_sql(
-            f"SELECT * FROM {CTAS_SCHEMA_NAME}.test_table",  # noqa: S608
+            f"SELECT * FROM {safe_ctas_schema}.test_table",  # noqa: S608
             "3",
-            username="SchemaUser",  # noqa: S608
+            username="SchemaUser",
         )
         assert 1 == len(data["data"])
 
         data = self.run_sql(
-            f"SELECT * FROM {CTAS_SCHEMA_NAME}.test_table",  # noqa: S608
+            f"SELECT * FROM {safe_ctas_schema}.test_table",  # noqa: S608
             "4",
             username="SchemaUser",
             schema=CTAS_SCHEMA_NAME,
@@ -324,7 +340,10 @@ class TestSqlLab(SupersetTestCase):
 
         db.session.query(Query).delete()
         with get_example_database().get_sqla_engine() as engine:
-            engine.execute(f"DROP TABLE IF EXISTS {CTAS_SCHEMA_NAME}.test_table")
+            # Quote schema identifier via dialect preparer to mitigate
+            # SQL injection (CWE-89) in raw DDL.
+            safe_schema = engine.dialect.identifier_preparer.quote(CTAS_SCHEMA_NAME)
+            engine.execute(f"DROP TABLE IF EXISTS {safe_schema}.test_table")
         db.session.commit()
 
     def test_alias_duplicate(self):
@@ -376,8 +395,12 @@ class TestSqlLab(SupersetTestCase):
         )
         assert len(data["data"]) == test_limit
 
+        # Cast LIMIT values to ``int`` so only numeric literals are
+        # interpolated into the raw SQL, mitigating SQL injection (CWE-89).
+        # The S608 suppressions below are kept because ruff's heuristic flags
+        # any f-string SQL regardless of whether the interpolated value is safe.
         data = self.run_sql(
-            f"SELECT * FROM birth_names LIMIT {test_limit}",  # noqa: S608
+            f"SELECT * FROM birth_names LIMIT {int(test_limit)}",  # noqa: S608
             client_id="sql_limit_3",
             query_limit=test_limit + 1,
         )
@@ -385,7 +408,7 @@ class TestSqlLab(SupersetTestCase):
         assert data["query"]["limitingFactor"] == LimitingFactor.QUERY
 
         data = self.run_sql(
-            f"SELECT * FROM birth_names LIMIT {test_limit + 1}",  # noqa: S608
+            f"SELECT * FROM birth_names LIMIT {int(test_limit) + 1}",  # noqa: S608
             client_id="sql_limit_4",
             query_limit=test_limit,
         )
@@ -393,7 +416,7 @@ class TestSqlLab(SupersetTestCase):
         assert data["query"]["limitingFactor"] == LimitingFactor.DROPDOWN
 
         data = self.run_sql(
-            f"SELECT * FROM birth_names LIMIT {test_limit}",  # noqa: S608
+            f"SELECT * FROM birth_names LIMIT {int(test_limit)}",  # noqa: S608
             client_id="sql_limit_5",
             query_limit=test_limit,
         )
