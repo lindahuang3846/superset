@@ -22,6 +22,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from flask import current_app
+from sqlalchemy import column as sa_column, select, table as sa_table
 
 from superset.connectors.sqla.models import SqlaTable, TableColumn
 from superset.utils.decorators import transaction
@@ -94,27 +95,22 @@ class DatetimeFormatDetector:
 
             # Get the database engine's dialect for proper identifier quoting
             with database.get_sqla_engine() as engine:
-                dialect = engine.dialect
-
-                # Quote identifiers using the dialect's identifier preparer
-                column_name_quoted = dialect.identifier_preparer.quote(
-                    column.column_name
+                # Build the query using SQLAlchemy's expression language so the
+                # dialect compiler quotes identifiers safely, preventing SQL
+                # injection (CWE-89) regardless of the values of the column,
+                # table, or schema names.
+                col = sa_column(column.column_name)
+                tbl = sa_table(
+                    dataset.table_name,
+                    col,
+                    schema=dataset.schema or None,
                 )
-                table_name_quoted = dialect.identifier_preparer.quote(
-                    dataset.table_name
-                )
-
-                if dataset.schema:
-                    schema_quoted = dialect.identifier_preparer.quote(dataset.schema)
-                    full_table = f"{schema_quoted}.{table_name_quoted}"
-                else:
-                    full_table = table_name_quoted
-
-                # Build SQL query string with quoted identifiers
-                # S608: false positive - using dialect's identifier preparer
-                sql = (  # noqa: S608
-                    f"SELECT {column_name_quoted} FROM {full_table} "  # noqa: S608
-                    f"WHERE {column_name_quoted} IS NOT NULL"  # noqa: S608
+                stmt = select(col).select_from(tbl).where(col.isnot(None))
+                sql = str(
+                    stmt.compile(
+                        engine,
+                        compile_kwargs={"literal_binds": True},
+                    )
                 )
 
             # Apply database-specific LIMIT using apply_limit_to_sql
