@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, Mock
 import pandas as pd
 import pytest
 from sqlalchemy import types
+from sqlalchemy.dialects.mysql import dialect as mysql_dialect
 from sqlalchemy.engine import make_url
 
 from superset.db_engine_specs.singlestore import SingleStoreSpec
@@ -72,6 +73,25 @@ def test_cancel_query_failed() -> None:
     assert SingleStoreSpec.cancel_query(cursor_mock, query, "123 6") is False
 
     cursor_mock.execute.assert_called_once_with("KILL CONNECTION 123 6")
+
+
+@pytest.mark.parametrize(
+    "cancel_query_id",
+    [
+        "1; DROP TABLE x; --",
+        "123",
+        "abc 123",
+        "123 5; KILL CONNECTION 999",
+        "",
+        "123  5",
+    ],
+)
+def test_cancel_query_rejects_malformed_id(cancel_query_id: str) -> None:
+    query = Query()
+    cursor_mock = Mock()
+
+    assert SingleStoreSpec.cancel_query(cursor_mock, query, cancel_query_id) is False
+    cursor_mock.execute.assert_not_called()
 
 
 def test_get_cancel_query_id() -> None:
@@ -198,6 +218,7 @@ def test_get_function_names_with_db() -> None:
 
     mock_database = MagicMock()
     mock_database.get_inspector.return_value = mock_inspector_ctx
+    mock_database.quote_identifier = mysql_dialect().identifier_preparer.quote
 
     data = [
         {

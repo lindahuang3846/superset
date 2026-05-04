@@ -39,6 +39,11 @@ from superset.utils.core import GenericDataType
 
 logger = logging.getLogger(__name__)
 
+# Matches the ``"<connection_id> <aggregator_id>"`` format produced by
+# ``SingleStoreSpec.get_cancel_query_id`` and used to safely interpolate the
+# value into the ``KILL CONNECTION`` statement in ``cancel_query``.
+_CANCEL_QUERY_ID_RE = re.compile(r"\A\d+ \d+\Z")
+
 
 class SingleStoreSpec(BasicParametersMixin, BaseEngineSpec):
     engine_name = "SingleStore"
@@ -490,9 +495,12 @@ class SingleStoreSpec(BasicParametersMixin, BaseEngineSpec):
         }
 
         if (database_name := cls.get_default_schema(database, None)) is not None:
-            df = database.get_df(
-                f"SHOW FUNCTIONS IN `{database_name.replace('`', '``')}`"
-            )
+            # Quote the schema identifier via the SQLAlchemy dialect's
+            # identifier preparer so an attacker-controlled schema name
+            # cannot inject SQL into the ``SHOW FUNCTIONS IN`` statement
+            # (CWE-89).
+            quoted_schema = database.quote_identifier(database_name)
+            df = database.get_df(f"SHOW FUNCTIONS IN {quoted_schema}")
 
             functions.update(df.iloc[:, 0].tolist())
 
@@ -577,6 +585,16 @@ class SingleStoreSpec(BasicParametersMixin, BaseEngineSpec):
         :param cancel_query_id: SingleStore connection ID and aggregator ID
         :return: True if query cancelled successfully, False otherwise
         """
+        # ``cancel_query_id`` is produced by ``get_cancel_query_id`` as the
+        # space-joined string form of two integer IDs returned by
+        # ``CONNECTION_ID()`` / ``AGGREGATOR_ID()``. ``KILL CONNECTION`` does
+        # not accept bound parameters, so to protect against a maliciously
+        # crafted cancel id (e.g. one persisted via ``set_extra_json_key``)
+        # being interpolated into the statement, validate that the value
+        # matches the expected ``"<int> <int>"`` shape before executing
+        # (CWE-89).
+        if not _CANCEL_QUERY_ID_RE.match(cancel_query_id):
+            return False
         try:
             cursor.execute(f"KILL CONNECTION {cancel_query_id}")
         except Exception:  # pylint: disable=broad-except
