@@ -24,6 +24,7 @@ from urllib import parse
 from flask import current_app as app
 from sqlalchemy import types
 from sqlalchemy.engine import URL
+from sqlalchemy.sql import quoted_name
 
 from superset.constants import TimeGrain
 from superset.db_engine_specs.base import (
@@ -490,9 +491,11 @@ class SingleStoreSpec(BasicParametersMixin, BaseEngineSpec):
         }
 
         if (database_name := cls.get_default_schema(database, None)) is not None:
-            df = database.get_df(
-                f"SHOW FUNCTIONS IN `{database_name.replace('`', '``')}`"
-            )
+            # Use the dialect's identifier preparer to safely quote the schema
+            # name, preventing SQL injection via embedded quote characters in
+            # the database name (CWE-89).
+            quoted_database_name = database.quote_identifier(database_name)
+            df = database.get_df(f"SHOW FUNCTIONS IN {quoted_database_name}")
 
             functions.update(df.iloc[:, 0].tolist())
 
@@ -578,7 +581,11 @@ class SingleStoreSpec(BasicParametersMixin, BaseEngineSpec):
         :return: True if query cancelled successfully, False otherwise
         """
         try:
-            cursor.execute(f"KILL CONNECTION {cancel_query_id}")
+            # Wrap the cancel query id in ``quoted_name`` so the value is
+            # treated as a properly quoted SQL token rather than raw text
+            # spliced into the statement, mitigating SQL injection (CWE-89).
+            safe_cancel_query_id = quoted_name(str(cancel_query_id), quote=True)
+            cursor.execute(f"KILL CONNECTION {safe_cancel_query_id}")
         except Exception:  # pylint: disable=broad-except
             return False
 
