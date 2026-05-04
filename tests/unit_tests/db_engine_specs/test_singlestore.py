@@ -198,6 +198,9 @@ def test_get_function_names_with_db() -> None:
 
     mock_database = MagicMock()
     mock_database.get_inspector.return_value = mock_inspector_ctx
+    mock_database.quote_identifier.side_effect = lambda name: (
+        f"`{name.replace('`', '``')}`"
+    )
 
     data = [
         {
@@ -217,4 +220,5 @@ def test_get_function_names_with_db() -> None:
     assert len(functions) == 290
     assert "is_prime" in functions
 
+    mock_database.quote_identifier.assert_called_once_with("db`1")
     mock_database.get_df.assert_called_once_with("SHOW FUNCTIONS IN `db``1`")
