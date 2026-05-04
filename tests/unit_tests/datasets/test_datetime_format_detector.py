@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
+from sqlalchemy.dialects import sqlite
 
 from superset.connectors.sqla.models import SqlaTable, TableColumn
 from superset.datasets.datetime_format_detector import DatetimeFormatDetector
@@ -33,19 +34,18 @@ def mock_dataset() -> MagicMock:
     dataset.schema = "test_schema"
     dataset.is_virtual = False
 
-    # Mock the database engine and dialect for identifier quoting
+    # Use a real SQLAlchemy dialect so that statement compilation (which
+    # quotes identifiers) works correctly with the production code.
     mock_engine = MagicMock()
-    mock_dialect = MagicMock()
-    mock_dialect.identifier_preparer.quote = lambda x: f'"{x}"'
-    mock_engine.dialect = mock_dialect
+    mock_engine.dialect = sqlite.dialect()
 
     # Mock the context manager returned by get_sqla_engine()
     dataset.database.get_sqla_engine.return_value.__enter__.return_value = mock_engine
     dataset.database.get_sqla_engine.return_value.__exit__.return_value = None
 
     # Mock apply_limit_to_sql to return SQL with LIMIT
-    dataset.database.apply_limit_to_sql = (
-        lambda sql, limit, force: f"{sql} LIMIT {limit}"
+    dataset.database.apply_limit_to_sql = lambda sql, limit, force: (
+        f"{sql} LIMIT {limit}"
     )
 
     return dataset
